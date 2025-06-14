@@ -1,0 +1,15 @@
+yfinance
+newsapi-python
+vaderSentiment
+pandas
+numpy
+matplotlib
+seaborn
+scikit-learn
+statsmodels
+pmdarima
+tensorflow
+keras
+transformers
+sentencepiece
+
