@@ -5,6 +5,12 @@ import pandas as pd
 from statsmodels.tsa.stattools import adfuller
 from ta.momentum import RSIIndicator
 from ta.volatility import BollingerBands
+import matplotlib.pyplot as plt
+from statsmodels.tsa.stattools import kpss
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+
+
 
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -50,7 +56,7 @@ def prepare_merged_data(
     price_path = os.path.join(script_dir, '..', 'data', 'nvda_stock.csv'),
     sentiment_path = os.path.join(script_dir, '..', 'data', 'nvda_sentiment_daily.csv'),
     output_path = os.path.join(script_dir, '..', 'data', 'nvda_merged.csv'),
-    debug: bool = True,
+    debug: bool = False,
 ) -> pd.DataFrame:
     """Create a feature rich, merged data set for downstream modelling.
 
@@ -131,12 +137,6 @@ def prepare_merged_data(
 
     if debug: _report(df[["dow", "month_sin", "month_cos"]], "After calendar encodings")
 
-    # 6) Targets
-    df["target_return_1d"] = df["log_return"].shift(-1)  # next‑day return (regression)
-    df["target_up"] = (df["target_return_1d"] > 0).astype(int)  # classification label
-
-    if debug: _report(df[["target_return_1d", "target_up"]], "After target creation")
-
     # 7) Final clean‑up
     df = df.dropna().sort_index()
 
@@ -151,16 +151,41 @@ def prepare_merged_data(
 
     return df
 
+def check_seasonality(series: pd.Series, lags = 365, period: int = 365):
+    # Needs to be done once 
+    plot_acf(series, lags=lags)   
+    plot_pacf(series, lags=lags)
 
+    # Results: 
+    # With lags = 5:
+    # ACF stays at (or very near) 1.0 for the first several lags --> the level of the series is dominated by a strong persistent trend (in fact, a unit root)
+    # PACF has one big spike at lag 1, then drops to (essentially) zero --> Interpretation: an AR(1) model would be appropriate for this series (after removing stationarity)
+    # Suggests ARIMA(1, 1, 0)
+
+    # With lags = 30:
+    # suggests the same
+
+    # With lags = 365:
+
+    res = seasonal_decompose(series.dropna(), 
+                            model="multiplicative", 
+                            period= period)
+    res.plot()
+    plt.show()
+    # save residuals as a series in df to the raw data
+    df_residuals = pd.Series(res.resid, name="residuals")
+    df = df.join(df_residuals)
+
+    # save the seasonal component as a series in df to the raw data
+    df_seasonal = pd.Series(res.seasonal, name="seasonal")
+    df = df.join(df_seasonal)
+    # save the trend component as a series in df to the raw data
+    df_trend = pd.Series(res.trend, name="trend")
+    df = df.join(df_trend)
 
 def check_stationarity(series: pd.Series) -> float:
-    """Run Augmented Dickey–Fuller test and return the p value.
-    If p value < 0.05, the series is stationary.
-    That means the null hypothesis of the test (that the series has a unit root) can be rejected.
-    
-    Consequences of non-stationarity:
-    - Trends or seasonality can lead to misleading results in time series models.
-    - Models that assume stationarity (like ARIMA) may not perform well.
+    """
+    Check stationarity.
 
     For a time series to be stationary, 
     its statistical properties(mean, variance, etc) will be the same throughout the series, 
@@ -169,8 +194,53 @@ def check_stationarity(series: pd.Series) -> float:
     A stationary time series will have no long-term predictable patterns such as trends or seasonality. 
     Time plots will show the series to roughly have a horizontal trend with the constant variance.
 
+    Consequences of non-stationarity:
+    - Trends or seasonality can lead to misleading results in time series models.
+    - Models that assume stationarity (like ARIMA) may not perform well.
+
     In case of non-stationarity, we need to difference the series or use transformations.
+   
+    Usage of Augmented Dickey-Fuller test as well as Kwiatkowski–Phillips–Schmidt–Shintests test.
+    The null hypothesis of the ADF test is that the time series is not stationary whereas that for the KPSS is that it is stationary.
+
+    ADF test: 
+    If p value < 0.05, the series is stationary.
+    That means the null hypothesis of the test (that the series has a unit root) can be rejected.
+    
+    KPSS test:
+    If p value > 0.05, the series is stationary.
     """
+    # Calculating rolling mean and rolling standard deviation:
+    rolling_mean = series.rolling(30).mean()
+    rolling_std_dev = series.rolling(30).std()
+
+    # Plotting the statistics:
+    plt.figure(figsize=(24,6))
+    plt.plot(rolling_mean, color='blue', label='Rolling Mean')
+    plt.plot(rolling_std_dev, color='green', label = 'Rolling Std Dev')
+    plt.plot(series, color='red',label='Original Time Series')
+    plt.legend(loc='best')
+    plt.title(f'Rolling Mean and Standard Deviation {series.name}')
+    plt.show()
+
+    print("ADF Test:")
+    adf_test = adfuller(series,autolag='AIC')
+    print('Null Hypothesis: Not Stationary')
+    print('ADF Statistic: %f' % adf_test[0])
+    print('p-value: %f' % adf_test[1])
+    print('Critical Values:')
+    for key, value in adf_test[4].items():
+        print('\t%s: %.3f' % (key, value))
+
+    print("KPSS Test:")
+    kpss_test = kpss(series, regression='c', nlags="auto", store=False)
+    print('Null Hypothesis: Stationary')
+    print('KPSS Statistic: %f' % kpss_test[0])
+    print('p-value: %f' % kpss_test[1])
+    print('Critical Values:')
+    for key, value in kpss_test[3].items():
+        print('\t%s: %.4f' % (key, value))
+
     p_value = adfuller(series.dropna())[1]
     print(f"ADF p-value: {p_value:.3e}")
     return p_value
@@ -180,5 +250,10 @@ if __name__ == "__main__":
     # 1) Build feature set
     data = prepare_merged_data()
 
+    # 2) Check for seasonality
+    #_ = check_seasonality(data["Close"], period=252)
     # 2) Stationarity diagnostic on log returns
-    _ = check_stationarity(data["log_return"])
+    #_ = check_stationarity(data["log_return"])
+    # 3) Stationarity diagnostic on closing prices
+    #_ = check_stationarity(data["Close"])
+    _ = check_stationarity(data["residuals"])
