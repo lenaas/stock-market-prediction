@@ -159,7 +159,7 @@ def check_stationarity(series: pd.Series) -> float:
     - Trends or seasonality can lead to misleading results in time series models.
     - Models that assume stationarity (like ARIMA) may not perform well.
 
-    In case of non-stationarity, consider differencing the series or using transformations.
+    In case of non-stationarity, we need to difference the series or use transformations.
     """
     p_value = adfuller(series.dropna())[1]
     print(f"ADF p-value: {p_value:.3e}")
