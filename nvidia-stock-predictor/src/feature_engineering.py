@@ -9,7 +9,7 @@ from ta.volatility import BollingerBands
 script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def _report(df: pd.DataFrame, title: str, n: int = 3) -> None:
-    """Light‑weight console report: shape, NaN count and preview."""
+    """Create console report for debugging purpose: shape, NaN count and preview."""
     print("\n" + "=" * 80)
     print(f"{title}  |  shape = {df.shape}")
     print("NaNs by column:\n", df.isna().sum().loc[lambda s: s.gt(0)].to_dict())
@@ -18,15 +18,16 @@ def _report(df: pd.DataFrame, title: str, n: int = 3) -> None:
 
 def time_decay_impute(series: pd.Series, halflife: int = 3, fill_start: bool = True) -> tuple[pd.Series, pd.Series]:
     """Impute missing sentiment values with an exponential weighted mean (past only).
+    Using past only as the assumption is that only the past sentiment is influencing current sentiment.
 
     Parameters
     ----------
     series : pd.Series
         Sentiment series containing NaNs.
-    halflife : str, default "3D"
-        Half life for the exponential decay, expressed as a pandas offset alias.
+    halflife : int, default 3
+        Half life for the exponential decay, expressed in periods (here: days).
         Set to 3 days since this should cover the typical sentiment decay period for news outlets.
-        (For example: Social media would have < 12h decay, while news articles might last longer.)
+        (For example: Social media would have < 12h decay, while news articles might last longer (this is at least our assumption).)
 
     Returns
     -------
@@ -37,10 +38,11 @@ def time_decay_impute(series: pd.Series, halflife: int = 3, fill_start: bool = T
     # Note: adjust=False means we only use past values, not future ones
     ewma = series.ewm(halflife=halflife, adjust=False).mean()
     filled = series.fillna(ewma)
-    if fill_start:                              # zero-fill leading NaNs
+
+    # zero-filling leading sentiments since we don't have past data here but we do need sth 
+    if fill_start:                              
         filled = filled.fillna(0.0)
-    # Create a missing indicator (1 for missing, 0 for filled)
-    # This can be useful for downstream models to learn about missingness
+    # Create a missing indicator (1 for missing, 0 for filled) (could be useful for the models)
     missing = series.isna().astype(int)
     return filled, missing
 
@@ -67,6 +69,8 @@ def prepare_merged_data(
     )
     # Ensure the 'Close' column is numeric, coercing errors to NaN
     price["Close"] = pd.to_numeric(price["Close"], errors="coerce")
+
+    # If any NaNs in Close column --> linear interpolation
     price["Close"].interpolate(method="linear", inplace=True)
 
     sentiment = (
@@ -113,7 +117,7 @@ def prepare_merged_data(
     for l in (1, 2, 3):
         df[f"log_return_l{l}"] = df["log_return"].shift(l)
         df[f"sentiment_l{l}"] = df["sentiment"].shift(l)
-    if debug: _report(df.filter(regex="_l[123]$"), "After lag features (step 4)")
+    if debug: _report(df.filter(regex="_l[123]$"), "After lag features")
 
     # 5) Calendar encodings
     df["dow"] = df.index.dayofweek  # 0 = Monday
@@ -128,7 +132,7 @@ def prepare_merged_data(
     df["target_return_1d"] = df["log_return"].shift(-1)  # next‑day return (regression)
     df["target_up"] = (df["target_return_1d"] > 0).astype(int)  # classification label
 
-    if debug: _report(df[["target_return_1d", "target_up"]], "After target creation (step 6)")
+    if debug: _report(df[["target_return_1d", "target_up"]], "After target creation")
 
     # 7) Final clean‑up
     df = df.dropna().sort_index()
