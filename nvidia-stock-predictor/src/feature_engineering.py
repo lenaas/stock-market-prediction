@@ -100,10 +100,13 @@ def prepare_merged_data(
     # Returns and volatility
     df["simple_return"] = df["Close"].pct_change()
     df["log_return"] = np.log(df["Close"]).diff()
+
     df["volatility"] = df["log_return"].rolling(7).std()  # 7-day rolling volatility
 
     # RSI and Bollinger Bands
     # RSI (Relative Strength Index) with a 14-day window (default)
+    # RSI is a momentum oscillator that measures the speed and change of price movements
+    # it ranges from 0 to 100, typically used to identify overbought or oversold conditions
     df["rsi14"] = RSIIndicator(df["Close"], window=14).rsi()
     # Bollinger Bands with a 20-day window
     bb = BollingerBands(df["Close"], window=20)
@@ -158,6 +161,13 @@ def check_stationarity(series: pd.Series) -> float:
     Consequences of non-stationarity:
     - Trends or seasonality can lead to misleading results in time series models.
     - Models that assume stationarity (like ARIMA) may not perform well.
+
+    For a time series to be stationary, 
+    its statistical properties(mean, variance, etc) will be the same throughout the series, 
+    irrespective of the time at which you observe them. 
+    
+    A stationary time series will have no long-term predictable patterns such as trends or seasonality. 
+    Time plots will show the series to roughly have a horizontal trend with the constant variance.
 
     In case of non-stationarity, we need to difference the series or use transformations.
     """
