@@ -98,8 +98,14 @@ def merge_data(price: pd.DataFrame, sentiment: pd.DataFrame, debug: bool = False
 
 
 def add_price_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
-    """Add returns, volatility, RSI and Bollinger bands."""
+    """Add returns, volatility, RSI and Bollinger bands.
+    Log returns are defined as the difference of the log of closing prices.
+    Simple returns are defined as the percentage change of closing prices.
+    Volatility is defined as the rolling standard deviation of log returns.
+    Bollinger bands are defined as the width of the bands around a 20-day moving average.
+    RSI is defined as the 14-day relative strength index."""
 
+    df['close_diff']= df["Close"].diff()
     df["simple_return"] = df["Close"].pct_change()
     df["log_return"] = np.log(df["Close"]).diff()
     df["volatility"] = df["log_return"].rolling(7).std()
@@ -197,8 +203,8 @@ def check_stationarity(series: pd.Series) -> tuple[float, float]:
 def save_diagnostics_pdf(
     series: pd.Series,
     pdf_path: str,
-    period: int = 252,
-    lags: int = 126,
+    period: int = 249,
+    lags: int = 124,
     model = "multiplicative",
 ) -> pd.DataFrame:
     """Create a PDF summarizing seasonality and stationarity diagnostics."""
@@ -268,13 +274,13 @@ if __name__ == "__main__":
 
     # Diagnose seasonality and stationarity on raw closing prices
     #decomposition_1 = save_diagnostics_pdf(price_df["Close"], pdf_file)
-    decomposition_2 = save_diagnostics_pdf(price_df["ln_close"], pdf_file, model="additive")
-    # usage of ln_close is preferred as it is more stationary than the raw prices
+    #decomposition_2 = save_diagnostics_pdf(price_df["ln_close"], pdf_file, model="additive")
     # still not stationary according to KPSS tests though
-    # first try: no differencing to make it stationary since usage of SARIMA in next step
-    # SARIMA will handle the non-stationarity
+    # will be dealt with in the respective models
 
     # Build feature set and merge decomposition components
     df = prepare_merged_data(price_file, sentiment_file)
-    df = df.join(decomposition_2, rsuffix="_ln")
-    print(df.head())
+    decomposition = save_diagnostics_pdf(
+        df["close_diff"], pdf_file, model="additive")
+    #df = df.join(decomposition_1)
+    #print(df.head())
