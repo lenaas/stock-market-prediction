@@ -1,18 +1,21 @@
+"""Utility functions for preparing NVDA price and sentiment features."""
+
 from __future__ import annotations
+
 import os
 import numpy as np
 import pandas as pd
-from statsmodels.tsa.stattools import adfuller
-from ta.momentum import RSIIndicator
-from ta.volatility import BollingerBands
 import matplotlib.pyplot as plt
-from statsmodels.tsa.stattools import kpss
+from statsmodels.tsa.stattools import adfuller, kpss
 from statsmodels.tsa.seasonal import seasonal_decompose
 from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
+from matplotlib.backends.backend_pdf import PdfPages
+from ta.momentum import RSIIndicator
+from ta.volatility import BollingerBands
 
 
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
 
 def _report(df: pd.DataFrame, title: str, n: int = 3) -> None:
     """Create console report for debugging purpose: shape, NaN count and preview."""
@@ -22,7 +25,9 @@ def _report(df: pd.DataFrame, title: str, n: int = 3) -> None:
     print("Preview:\n", df.head(n))
 
 
-def time_decay_impute(series: pd.Series, halflife: int = 3, fill_start: bool = True) -> tuple[pd.Series, pd.Series]:
+def time_decay_impute(
+    series: pd.Series, halflife: int = 3, fill_start: bool = True
+) -> tuple[pd.Series, pd.Series]:
     """Impute missing sentiment values with an exponential weighted mean (past only).
     Using past only as the assumption is that only the past sentiment is influencing current sentiment.
 
@@ -45,215 +50,231 @@ def time_decay_impute(series: pd.Series, halflife: int = 3, fill_start: bool = T
     ewma = series.ewm(halflife=halflife, adjust=False).mean()
     filled = series.fillna(ewma)
 
-    # zero-filling leading sentiments since we don't have past data here but we do need sth 
-    if fill_start:                              
+    # zero-filling leading sentiments since we don't have past data here but we do need sth
+    if fill_start:
         filled = filled.fillna(0.0)
     # Create a missing indicator (1 for missing, 0 for filled) (could be useful for the models)
     missing = series.isna().astype(int)
     return filled, missing
 
-def prepare_merged_data(
-    price_path = os.path.join(script_dir, '..', 'data', 'nvda_stock.csv'),
-    sentiment_path = os.path.join(script_dir, '..', 'data', 'nvda_sentiment_daily.csv'),
-    output_path = os.path.join(script_dir, '..', 'data', 'nvda_merged.csv'),
-    debug: bool = False,
-) -> pd.DataFrame:
-    """Create a feature rich, merged data set for downstream modelling.
 
-    The function loads price and sentiment data, merges them on the date index,
-    performs sentiment imputation (3 day half life), generates a variety of
-    price based and calendar features, adds target columns, and persists the
-    resulting data frame to *output_path*.
-    """
+def load_price_data(price_path: str) -> pd.DataFrame:
+    """Load NVDA price data and ensure numeric closing prices."""
 
-    # 1) Load and basic cleaning
     price = (
-        pd.read_csv(price_path, parse_dates=["Date"])
+        pd.read_csv(price_path, parse_dates=["Date"], skiprows=[1])
         .sort_values("Date")
         .drop_duplicates("Date")
         .set_index("Date")
     )
-    # Ensure the 'Close' column is numeric, coercing errors to NaN
     price["Close"] = pd.to_numeric(price["Close"], errors="coerce")
-
-    # If any NaNs in Close column --> linear interpolation
     price["Close"].interpolate(method="linear", inplace=True)
+    price["ln_close"] = np.log(price["Close"])
+    return price
 
-    sentiment = (
+
+def load_sentiment_data(sentiment_path: str) -> pd.DataFrame:
+    """Load already aggregated daily sentiment."""
+
+    return (
         pd.read_csv(sentiment_path, parse_dates=["date"])
         .rename(columns={"date": "Date"})
         .sort_values("Date")
         .drop_duplicates("Date")
         .set_index("Date")
     )
-    if debug: _report(price, "Before merge price")
-    if debug: _report(sentiment, "Before merge sentiment")
 
+
+def merge_data(price: pd.DataFrame, sentiment: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
+    """Merge price and sentiment information on the Date index."""
 
     df = price.join(sentiment, how="left")
     df.index = pd.to_datetime(df.index)
-
-    if debug: _report(df, "After merge")
-
-    # 2) Sentiment imputation (half‑life = 3 days)
-    df["sentiment"], df["sentiment_missing"] = time_decay_impute(
-        df["sentiment"], halflife=3
-    )
-    if debug: _report(df[["sentiment", "sentiment_missing"]], "After sentiment imputation")
+    if debug:
+        _report(price, "Before merge price")
+        _report(sentiment, "Before merge sentiment")
+        _report(df, "After merge")
+    return df
 
 
-    # 3) Price‑based features
-    # Returns and volatility
+def add_price_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
+    """Add returns, volatility, RSI and Bollinger bands."""
+
     df["simple_return"] = df["Close"].pct_change()
     df["log_return"] = np.log(df["Close"]).diff()
-
-    df["volatility"] = df["log_return"].rolling(7).std()  # 7-day rolling volatility
-
-    # RSI and Bollinger Bands
-    # RSI (Relative Strength Index) with a 14-day window (default)
-    # RSI is a momentum oscillator that measures the speed and change of price movements
-    # it ranges from 0 to 100, typically used to identify overbought or oversold conditions
+    df["volatility"] = df["log_return"].rolling(7).std()
     df["rsi14"] = RSIIndicator(df["Close"], window=14).rsi()
-    # Bollinger Bands with a 20-day window
     bb = BollingerBands(df["Close"], window=20)
     df["bb_width"] = bb.bollinger_wband()
     df["vol_roll5"] = df["log_return"].rolling(5).std()
+    if debug:
+        _report(df[["log_return", "rsi14", "bb_width", "vol_roll5"]], "After price features")
+    return df
 
-    if debug: _report(df[["log_return", "rsi14", "bb_width", "vol_roll5"]], "After price features")
 
+def add_lag_features(df: pd.DataFrame, lags: tuple[int, ...] = (1, 252), debug: bool = False) -> pd.DataFrame:
+    """Create lagged versions of sentiment and return series."""
 
-    # 4) Lag features (1–3 days)
-    for l in (1, 2, 3):
+    for l in lags:
         df[f"log_return_l{l}"] = df["log_return"].shift(l)
         df[f"sentiment_l{l}"] = df["sentiment"].shift(l)
-    if debug: _report(df.filter(regex="_l[123]$"), "After lag features")
+        df[f"close_l{l}"] = df["Close"].shift(l)
+    if debug:
+        lag_cols = df.filter(regex="_l(1|252)$").columns
+        _report(df[lag_cols].tail(), "After lag features")
+    return df
 
-    # 5) Calendar encodings
-    df["dow"] = df.index.dayofweek  # 0 = Monday
-    # month_sin and month_cos for cyclical encoding of months
-    # using cyclical encoding since otherwise december and january would be not treated as close
+
+def add_calendar_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
+    """Encode day of week and month cycles."""
+
+    df["dow"] = df.index.dayofweek
     df["month_sin"] = np.sin(2 * np.pi * df.index.month / 12)
     df["month_cos"] = np.cos(2 * np.pi * df.index.month / 12)
+    if debug:
+        _report(df[["dow", "month_sin", "month_cos"]], "After calendar encodings")
+    return df
 
-    if debug: _report(df[["dow", "month_sin", "month_cos"]], "After calendar encodings")
+def prepare_merged_data(
+    price_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_stock.csv"),
+    sentiment_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_sentiment_daily.csv"),
+    output_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_merged.csv"),
+    debug: bool = False,
+) -> pd.DataFrame:
+    """Create a feature rich, merged data set for downstream modelling."""
 
-    # 7) Final clean‑up
+    price = load_price_data(price_path)
+    sentiment = load_sentiment_data(sentiment_path)
+    df = merge_data(price, sentiment, debug=debug)
+
+    df["sentiment"], df["sentiment_missing"] = time_decay_impute(
+        df["sentiment"], halflife=3
+    )
+    if debug:
+        _report(df[["sentiment", "sentiment_missing"]], "After sentiment imputation")
+
+    df = add_price_features(df, debug=debug)
+    df = add_lag_features(df, debug=debug)
+    df = add_calendar_features(df, debug=debug)
+
     df = df.dropna().sort_index()
-
     if debug:
         print("\nFinal data shape after dropna:", df.shape)
         print("Any remaining NaNs?", df.isna().any().any())
 
-    # 8) Persist feature set
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=True)
     print(f"Features saved to {output_path}")
 
     return df
 
-def check_seasonality(series: pd.Series, lags = 365, period: int = 365):
-    # Needs to be done once 
-    plot_acf(series, lags=lags)   
-    plot_pacf(series, lags=lags)
 
-    # Results: 
-    # With lags = 5:
-    # ACF stays at (or very near) 1.0 for the first several lags --> the level of the series is dominated by a strong persistent trend (in fact, a unit root)
-    # PACF has one big spike at lag 1, then drops to (essentially) zero --> Interpretation: an AR(1) model would be appropriate for this series (after removing stationarity)
-    # Suggests ARIMA(1, 1, 0)
+def check_seasonality(series: pd.Series, period: int = 252) -> pd.DataFrame:
+    """Return decomposition components of ``series``."""
 
-    # With lags = 30:
-    # suggests the same
+    decomposition = seasonal_decompose(series.dropna(), model="multiplicative", period=period)
 
-    # With lags = 365:
+    return pd.DataFrame(
+        {
+            "seasonal": decomposition.seasonal,
+            "trend": decomposition.trend,
+            "residuals": decomposition.resid,
+        }
+    )
 
-    res = seasonal_decompose(series.dropna(), 
-                            model="multiplicative", 
-                            period= period)
-    res.plot()
-    plt.show()
-    # save residuals as a series in df to the raw data
-    df_residuals = pd.Series(res.resid, name="residuals")
-    df = df.join(df_residuals)
 
-    # save the seasonal component as a series in df to the raw data
-    df_seasonal = pd.Series(res.seasonal, name="seasonal")
-    df = df.join(df_seasonal)
-    # save the trend component as a series in df to the raw data
-    df_trend = pd.Series(res.trend, name="trend")
-    df = df.join(df_trend)
+def check_stationarity(series: pd.Series) -> tuple[float, float]:
+    """Return ADF and KPSS p-values for ``series``."""
 
-def check_stationarity(series: pd.Series) -> float:
-    """
-    Check stationarity.
+    series = series.dropna()
 
-    For a time series to be stationary, 
-    its statistical properties(mean, variance, etc) will be the same throughout the series, 
-    irrespective of the time at which you observe them. 
-    
-    A stationary time series will have no long-term predictable patterns such as trends or seasonality. 
-    Time plots will show the series to roughly have a horizontal trend with the constant variance.
+    adf_test = adfuller(series, autolag="AIC")
+    kpss_test = kpss(series, regression="c", nlags="auto", store=False)
 
-    Consequences of non-stationarity:
-    - Trends or seasonality can lead to misleading results in time series models.
-    - Models that assume stationarity (like ARIMA) may not perform well.
+    return adf_test[1], kpss_test[1]
 
-    In case of non-stationarity, we need to difference the series or use transformations.
-   
-    Usage of Augmented Dickey-Fuller test as well as Kwiatkowski–Phillips–Schmidt–Shintests test.
-    The null hypothesis of the ADF test is that the time series is not stationary whereas that for the KPSS is that it is stationary.
 
-    ADF test: 
-    If p value < 0.05, the series is stationary.
-    That means the null hypothesis of the test (that the series has a unit root) can be rejected.
-    
-    KPSS test:
-    If p value > 0.05, the series is stationary.
-    """
-    # Calculating rolling mean and rolling standard deviation:
-    rolling_mean = series.rolling(30).mean()
-    rolling_std_dev = series.rolling(30).std()
+def save_diagnostics_pdf(
+    series: pd.Series,
+    pdf_path: str,
+    period: int = 252,
+    lags: int = 126,
+    model = "multiplicative",
+) -> pd.DataFrame:
+    """Create a PDF summarizing seasonality and stationarity diagnostics."""
 
-    # Plotting the statistics:
-    plt.figure(figsize=(24,6))
-    plt.plot(rolling_mean, color='blue', label='Rolling Mean')
-    plt.plot(rolling_std_dev, color='green', label = 'Rolling Std Dev')
-    plt.plot(series, color='red',label='Original Time Series')
-    plt.legend(loc='best')
-    plt.title(f'Rolling Mean and Standard Deviation {series.name}')
-    plt.show()
+    decomposition = seasonal_decompose(series.dropna(), model=model, period=period)
+    residuals = decomposition.resid.dropna()
 
-    print("ADF Test:")
-    adf_test = adfuller(series,autolag='AIC')
-    print('Null Hypothesis: Not Stationary')
-    print('ADF Statistic: %f' % adf_test[0])
-    print('p-value: %f' % adf_test[1])
-    print('Critical Values:')
-    for key, value in adf_test[4].items():
-        print('\t%s: %.3f' % (key, value))
+    with PdfPages(pdf_path) as pdf:
+        fig = decomposition.plot()
+        fig.suptitle(f"{series.name} Decomposition", y=1.0)
+        pdf.savefig(fig)
+        plt.close(fig)
 
-    print("KPSS Test:")
-    kpss_test = kpss(series, regression='c', nlags="auto", store=False)
-    print('Null Hypothesis: Stationary')
-    print('KPSS Statistic: %f' % kpss_test[0])
-    print('p-value: %f' % kpss_test[1])
-    print('Critical Values:')
-    for key, value in kpss_test[3].items():
-        print('\t%s: %.4f' % (key, value))
+        fig, axes = plt.subplots(2, 1, figsize=(10, 8))
+        plot_acf(residuals, lags=lags, ax=axes[0])
+        plot_pacf(residuals, lags=lags, ax=axes[1])
+        axes[0].set_title("Residuals ACF")
+        axes[1].set_title("Residuals PACF")
+        fig.tight_layout()
+        pdf.savefig(fig)
+        plt.close(fig)
 
-    p_value = adfuller(series.dropna())[1]
-    print(f"ADF p-value: {p_value:.3e}")
-    return p_value
+        for data, title in [
+            (series.dropna(), f"{series.name} Stationarity"),
+            (residuals, "Residuals Stationarity"),
+        ]:
+            rolling_mean = data.rolling(30).mean()
+            rolling_std = data.rolling(30).std()
+            fig, ax = plt.subplots(figsize=(10, 4))
+            ax.plot(data, label="Series", color="red")
+            ax.plot(rolling_mean, label="Rolling Mean", color="blue")
+            ax.plot(rolling_std, label="Rolling Std", color="green")
+            ax.set_title(title)
+            ax.legend()
+            pdf.savefig(fig)
+            plt.close(fig)
+
+            adf_p, kpss_p = check_stationarity(data)
+            fig, ax = plt.subplots(figsize=(8, 2))
+            ax.axis("off")
+            text = (
+                f"{series.name} ADF p-value: {adf_p:.4f}\n"
+                f"{series.name} KPSS p-value: {kpss_p:.4f}\n"
+                "Interpretation:\n"
+                f"ADF: {'Stationary' if adf_p < 0.05 else 'Non-stationary'}\n"
+                f"KPSS: {'Non-stationary' if kpss_p < 0.05 else 'Stationary'}"
+            )
+            ax.text(0.1, 0.5, text, fontsize=10)
+            pdf.savefig(fig)
+            plt.close(fig)
+
+    return pd.DataFrame(
+        {
+            "seasonal": decomposition.seasonal,
+            "trend": decomposition.trend,
+            "residuals": decomposition.resid,
+        }
+    )
 
 
 if __name__ == "__main__":
-    # 1) Build feature set
-    data = prepare_merged_data()
+    price_file = os.path.join(SCRIPT_DIR, "..", "data", "nvda_stock.csv")
+    sentiment_file = os.path.join(SCRIPT_DIR, "..", "data", "nvda_sentiment_daily.csv")
 
-    # 2) Check for seasonality
-    #_ = check_seasonality(data["Close"], period=252)
-    # 2) Stationarity diagnostic on log returns
-    #_ = check_stationarity(data["log_return"])
-    # 3) Stationarity diagnostic on closing prices
-    #_ = check_stationarity(data["Close"])
-    _ = check_stationarity(data["residuals"])
+    price_df = load_price_data(price_file)
+    pdf_file = os.path.join(SCRIPT_DIR, "..", "models", "diagnostics.pdf")
+
+    # Diagnose seasonality and stationarity on raw closing prices
+    #decomposition_1 = save_diagnostics_pdf(price_df["Close"], pdf_file)
+    decomposition_2 = save_diagnostics_pdf(price_df["ln_close"], pdf_file, model="additive")
+    # usage of ln_close is preferred as it is more stationary than the raw prices
+    # still not stationary according to KPSS tests though
+    # first try: no differencing to make it stationary since usage of SARIMA in next step
+    # SARIMA will handle the non-stationarity
+
+    # Build feature set and merge decomposition components
+    df = prepare_merged_data(price_file, sentiment_file)
+    df = df.join(decomposition_2, rsuffix="_ln")
+    print(df.head())
