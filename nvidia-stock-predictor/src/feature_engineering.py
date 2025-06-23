@@ -282,5 +282,5 @@ if __name__ == "__main__":
     df = prepare_merged_data(price_file, sentiment_file)
     decomposition = save_diagnostics_pdf(
         df["close_diff"], pdf_file, model="additive")
-    #df = df.join(decomposition_1)
-    #print(df.head())
+    df = df.join(decomposition)
+    print(df.head())
