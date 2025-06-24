@@ -118,7 +118,7 @@ def add_price_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
     return df
 
 
-def add_lag_features(df: pd.DataFrame, lags: tuple[int, ...] = (1, 252), debug: bool = False) -> pd.DataFrame:
+def add_lag_features(df: pd.DataFrame, lags: tuple[int, ...] = (1,3,5,10, 252), debug: bool = False) -> pd.DataFrame:
     """Create lagged versions of sentiment and return series."""
 
     for l in lags:
@@ -175,7 +175,7 @@ def prepare_merged_data(
     return df
 
 
-def check_seasonality(series: pd.Series, period: int = 252) -> pd.DataFrame:
+def check_seasonality(series: pd.Series, period: int = 5) -> pd.DataFrame:
     """Return decomposition components of ``series``."""
 
     decomposition = seasonal_decompose(series.dropna(), model="multiplicative", period=period)
@@ -203,8 +203,8 @@ def check_stationarity(series: pd.Series) -> tuple[float, float]:
 def save_diagnostics_pdf(
     series: pd.Series,
     pdf_path: str,
-    period: int = 249,
-    lags: int = 124,
+    period: int = 5,
+    lags: int = 3,
     model = "multiplicative",
 ) -> pd.DataFrame:
     """Create a PDF summarizing seasonality and stationarity diagnostics."""
@@ -281,6 +281,6 @@ if __name__ == "__main__":
     # Build feature set and merge decomposition components
     df = prepare_merged_data(price_file, sentiment_file)
     decomposition = save_diagnostics_pdf(
-        df["close_diff"], pdf_file, model="additive")
+        df["log_return"], pdf_file, model="additive")
     df = df.join(decomposition)
     print(df.head())

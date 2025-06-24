@@ -1,12 +1,13 @@
 import os
 import pandas as pd
-from typing import Optional
 import numpy as np
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
+from typing import Optional
 import matplotlib.pyplot as plt
 
-# Adjust SCRIPT_DIR if running interactively or from a notebook
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+# Adjust SCRIPT_DIR
 try:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 except NameError:
@@ -14,75 +15,68 @@ except NameError:
 
 
 def load_data(path: Optional[str] = None) -> pd.DataFrame:
-    """Load merged NVDA data (with log_return and features)."""
+    """Load preprocessed NVDA data with sentiment, log_return, close_l1, and Close columns."""
     if path is None:
-        path = os.path.join(SCRIPT_DIR, "..", "data", "nvda_merged.csv")
-    df = pd.read_csv(path, parse_dates=["Date"]).set_index("Date")
+        path = os.path.join(SCRIPT_DIR, '..', 'data', 'nvda_merged.csv')
+    df = pd.read_csv(path, parse_dates=['Date']).set_index('Date')
     return df
 
 
 def train_linear_model(df: pd.DataFrame) -> LinearRegression:
-    """Train regression on log returns and evaluate prediction error."""
+    """Train simple OLS on log returns using only sentiment, reconstruct Close price, and evaluate."""
+    # Use only sentiment as predictor
+    features = ['sentiment']
+    target = 'log_return'
 
-    # Features for the model
-    features = [
-        "sentiment",
-        "volatility",
-        "rsi14",
-        "bb_width",
-        "vol_roll5",
-        "sentiment_l1",
-        "sentiment_l252",
-        "log_return_l1",
-        "log_return_l252",
-    ]
-
-    target = "log_return"
-    # Only need features and target for log-return modeling
-    req_cols = features + [target]
-    df[req_cols] = df[req_cols].fillna(0)
+    # Drop rows with missing sentiment or required columns
+    df_model = df[features + [target, 'close_l1', 'Close']].dropna()
 
     # Train-test split (80/20)
-    split_idx = int(len(df) * 0.8)
-    train_df = df.iloc[:split_idx]
-    test_df = df.iloc[split_idx:]
+    split_idx = int(len(df_model) * 0.8)
+    train_df = df_model.iloc[:split_idx]
+    test_df = df_model.iloc[split_idx:]
 
-    # Prepare data
     X_train = train_df[features]
     y_train = train_df[target]
     X_test = test_df[features]
     y_test = test_df[target]
+    prev_close = test_df['close_l1'].values
+    true_close = test_df['Close'].values
 
-    # Fit OLS regression on log returns
+    # Fit OLS regression
     model = LinearRegression()
     model.fit(X_train, y_train)
-    preds = model.predict(X_test)
 
-    # Compute evaluation metrics on log-return predictions
-    mae = mean_absolute_error(y_test, preds)
-    mse = mean_squared_error(y_test, preds)
-    r2 = model.score(X_test, y_test)
+    # Predict log returns
+    preds_log = model.predict(X_test)
 
-    print("\nLinear Regression on Log-Returns")
-    print("MAE (log return):", round(mae, 6))
-    print("MSE (log return):", round(mse, 6))
-    print("R^2:", round(r2, 4))
-    print("Coefficients:")
-    for name, coef in zip(features, model.coef_):
-        print(f"  {name}: {coef:.6f}")
+    # Reconstruct Close price forecasts: Close_t = Close_{t-1} * exp(log_return_t)
+    preds_close = prev_close * np.exp(preds_log)
 
-    # Plot actual vs predicted log returns
+    # Compute evaluation metrics on prices
+    mae_price = mean_absolute_error(true_close, preds_close)
+    mse_price = mean_squared_error(true_close, preds_close)
+    r2_price = r2_score(true_close, preds_close)
+
+    print("\nLinear Regression (sentiment only)")
+    print(f"MAE (Close price): {mae_price:.4f}")
+    print(f"MSE (Close price): {mse_price:.4f}")
+    print(f"R^2 (Close price): {r2_price:.4f}")
+    print(f"Coefficient (sentiment): {model.coef_[0]:.6f}")
+    print(f"Intercept: {model.intercept_:.6f}")
+
+    # Plot actual vs predicted Close prices
     plt.figure(figsize=(10, 5))
-    plt.plot(test_df.index, y_test, label="Actual Log Return")
-    plt.plot(test_df.index, preds, label="Predicted Log Return")
-    plt.title("Actual vs Predicted Log Return")
-    plt.xlabel("Date")
-    plt.ylabel("Log Return")
+    plt.plot(test_df.index, true_close, label='Actual Close')
+    plt.plot(test_df.index, preds_close, label='Predicted Close')
+    plt.title('Actual vs Predicted Close Price')
+    plt.xlabel('Date')
+    plt.ylabel('Close Price')
     plt.legend()
     plt.tight_layout()
 
     # Save figure
-    output_path = os.path.join(SCRIPT_DIR, "..", "models", "linear_log_return_forecast.png")
+    output_path = os.path.join(SCRIPT_DIR, '..', 'models', 'linear_sentiment_only.png')
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.savefig(output_path)
     plt.show()
@@ -95,22 +89,12 @@ def main():
     train_linear_model(df)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
 
 
-# Results:
-# Linear Regression on Log-Returns
-# MAE (log return): 0.023593
-# MSE (log return): 0.000912
-# R^2: -0.1279
-# Coefficients:
-#   sentiment: 0.070683
-#   volatility: 0.363273
-#   rsi14: 0.001940
-#   bb_width: -0.000966
-#   vol_roll5: 0.306720
-#   sentiment_l1: -0.002626
-#   sentiment_l252: -0.000000
-#   log_return_l1: -0.231224
-#   log_return_l252: -0.089224
+# Results
+# Sentiment Only: MAE 2.8735, MSE 12.9655, R^2 0.9103, Coefficient sentiment -0.016435
+# Sentiment + Lag 1 Sentiment: MAE 2.7662, MSE 12.7183, R^2 0.9120, Coefficient (sentiment) 0.026246
+# Sentiment + Lagged Sentiments: MAE 3.1343, MSE 16.0328, R^2 0.8890, Coefficient (sentiment) 0.012388 
+# Sentiment + Lag 3 Sentiments: MAE (Close price): 2.9469 MSE (Close price): 13.3302 R^2 (Close price): 0.9077 Coefficient (sentiment): -0.028210
