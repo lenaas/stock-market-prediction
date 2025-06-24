@@ -272,12 +272,8 @@ if __name__ == "__main__":
     price_df = load_price_data(price_file)
     pdf_file = os.path.join(SCRIPT_DIR, "..", "models", "diagnostics.pdf")
 
-    # Diagnose seasonality and stationarity on raw closing prices
-    #decomposition_1 = save_diagnostics_pdf(price_df["Close"], pdf_file)
-    #decomposition_2 = save_diagnostics_pdf(price_df["ln_close"], pdf_file, model="additive")
-    # still not stationary according to KPSS tests though
-    # will be dealt with in the respective models
-
+    # Since on raw closing prices no stationarity is detected,
+    # it's better to use log returns for models which require stationary data
     # Build feature set and merge decomposition components
     df = prepare_merged_data(price_file, sentiment_file)
     decomposition = save_diagnostics_pdf(
