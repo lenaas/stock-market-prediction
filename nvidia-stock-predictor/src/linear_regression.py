@@ -6,6 +6,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 import matplotlib.pyplot as plt
 
+# Adjust SCRIPT_DIR if running interactively or from a notebook
 try:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 except NameError:
@@ -13,7 +14,7 @@ except NameError:
 
 
 def load_data(path: Optional[str] = None) -> pd.DataFrame:
-    """Load merged NVDA data (with decomposition columns)."""
+    """Load merged NVDA data (with log_return and features)."""
     if path is None:
         path = os.path.join(SCRIPT_DIR, "..", "data", "nvda_merged.csv")
     df = pd.read_csv(path, parse_dates=["Date"]).set_index("Date")
@@ -21,9 +22,9 @@ def load_data(path: Optional[str] = None) -> pd.DataFrame:
 
 
 def train_linear_model(df: pd.DataFrame) -> LinearRegression:
-    """Train regression on residuals of log-returns and reconstruct close price."""
+    """Train regression on log returns and evaluate prediction error."""
 
-    # Features for the model (include commas between all entries!)
+    # Features for the model
     features = [
         "sentiment",
         "volatility",
@@ -37,8 +38,8 @@ def train_linear_model(df: pd.DataFrame) -> LinearRegression:
     ]
 
     target = "log_return"
-    # Required columns: features + target + decomposition + lagged close + actual close
-    req_cols = features + [target, "close_l1", "Close"]
+    # Only need features and target for log-return modeling
+    req_cols = features + [target]
     df[req_cols] = df[req_cols].fillna(0)
 
     # Train-test split (80/20)
@@ -52,41 +53,36 @@ def train_linear_model(df: pd.DataFrame) -> LinearRegression:
     X_test = test_df[features]
     y_test = test_df[target]
 
-    # Fit OLS regression on residuals
+    # Fit OLS regression on log returns
     model = LinearRegression()
     model.fit(X_train, y_train)
-    preds_residual = model.predict(X_test)
+    preds = model.predict(X_test)
 
-    # Reconstruct predicted log-return: add back trend + seasonal
-    predicted_log_return = preds_residual + test_df["trend"] + test_df["seasonal"]
-    # Convert log-return to price: Close_t = Close_{t-1} * exp(log_return_t)
-    predicted_close = test_df["close_l1"] * np.exp(predicted_log_return)
-
-    # Metrics on predicted close price
-    mae = mean_absolute_error(test_df["Close"], predicted_close)
-    mse = mean_squared_error(test_df["Close"], predicted_close)
+    # Compute evaluation metrics on log-return predictions
+    mae = mean_absolute_error(y_test, preds)
+    mse = mean_squared_error(y_test, preds)
     r2 = model.score(X_test, y_test)
 
-    print("\nLinear Regression on Residuals")
-    print("MAE (predicted close):", round(mae, 4))
-    print("MSE (predicted close):", round(mse, 4))
-    print("R^2 on residual regression:", round(r2, 4))
+    print("\nLinear Regression on Log-Returns")
+    print("MAE (log return):", round(mae, 6))
+    print("MSE (log return):", round(mse, 6))
+    print("R^2:", round(r2, 4))
     print("Coefficients:")
     for name, coef in zip(features, model.coef_):
-        print(f"  {name}: {coef:.4f}")
+        print(f"  {name}: {coef:.6f}")
 
-    # Plot actual vs predicted close price
+    # Plot actual vs predicted log returns
     plt.figure(figsize=(10, 5))
-    plt.plot(test_df.index, test_df["Close"], label="Actual")
-    plt.plot(test_df.index, predicted_close, label="Predicted")
-    plt.title("Actual vs Predicted Close Price (Residual Regression)")
+    plt.plot(test_df.index, y_test, label="Actual Log Return")
+    plt.plot(test_df.index, preds, label="Predicted Log Return")
+    plt.title("Actual vs Predicted Log Return")
     plt.xlabel("Date")
-    plt.ylabel("Price")
+    plt.ylabel("Log Return")
     plt.legend()
     plt.tight_layout()
 
     # Save figure
-    output_path = os.path.join(SCRIPT_DIR, "..", "models", "linear_regression_forecast.png")
+    output_path = os.path.join(SCRIPT_DIR, "..", "models", "linear_log_return_forecast.png")
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.savefig(output_path)
     plt.show()
@@ -101,3 +97,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# Results:
+# Linear Regression on Log-Returns
+# MAE (log return): 0.023593
+# MSE (log return): 0.000912
+# R^2: -0.1279
+# Coefficients:
+#   sentiment: 0.070683
+#   volatility: 0.363273
+#   rsi14: 0.001940
+#   bb_width: -0.000966
+#   vol_roll5: 0.306720
+#   sentiment_l1: -0.002626
+#   sentiment_l252: -0.000000
+#   log_return_l1: -0.231224
+#   log_return_l252: -0.089224
