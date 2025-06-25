@@ -121,3 +121,16 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+# Result:
+#MAE (next-day Close): 2.9135
+#MSE (next-day Close): 13.2831
+#R^2 (next-day Close): 0.9081
+#Coefficients:
+#  sentiment_l1: 0.047256
+#  sentiment: -0.061486
+#  dow_sin: -0.001620
+#  dow_cos: -0.002354
+#  month_sin: 0.004098
+#  month_cos: 0.002868
+#Intercept: 0.005745
