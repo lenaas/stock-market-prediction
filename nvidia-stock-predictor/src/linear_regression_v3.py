@@ -70,7 +70,7 @@ def main():
     features = [
         'sentiment_l1', 'sentiment',
         'dow_sin', 'dow_cos',
-        'month_sin','month_cos', 'high_vol'
+        'month_sin','month_cos'
     ]
 
     req_cols = features + ['target_return', 'close_t', 'true_close_t1']
