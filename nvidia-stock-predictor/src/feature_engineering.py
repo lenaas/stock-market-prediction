@@ -109,6 +109,10 @@ def add_price_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
     df["simple_return"] = df["Close"].pct_change()
     df["log_return"] = np.log(df["Close"]).diff()
     df["volatility"] = df["log_return"].rolling(7).std()
+    df['high_vol']   = (df['volatility'] > df['volatility'].median()).astype(int)
+    df['return_ma3'] = df['log_return'].rolling(3).sum()
+
+
     df["rsi14"] = RSIIndicator(df["Close"], window=14).rsi()
     bb = BollingerBands(df["Close"], window=20)
     df["bb_width"] = bb.bollinger_wband()
@@ -128,6 +132,9 @@ def add_lag_features(df: pd.DataFrame, lags: tuple[int, ...] = (1,3,5,10, 252), 
     if debug:
         lag_cols = df.filter(regex="_l(1|252)$").columns
         _report(df[lag_cols].tail(), "After lag features")
+    
+    df['return_accel'] = df['log_return'] - df['log_return_l1']
+
     return df
 
 
@@ -135,6 +142,8 @@ def add_calendar_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame
     """Encode day of week and month cycles."""
 
     df["dow"] = df.index.dayofweek
+    df["dow_sin"] = np.sin(2 * np.pi * df["dow"] / 7)
+    df["dow_cos"] = np.cos(2 * np.pi * df["dow"] / 7)
     df["month_sin"] = np.sin(2 * np.pi * df.index.month / 12)
     df["month_cos"] = np.cos(2 * np.pi * df.index.month / 12)
     if debug:

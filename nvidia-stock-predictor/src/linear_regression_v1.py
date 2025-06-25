@@ -26,7 +26,7 @@ def load_data(path: Optional[str] = None) -> pd.DataFrame:
 def train_linear_model(df: pd.DataFrame) -> LinearRegression:
     """Train simple OLS on log returns using only sentiment, reconstruct Close price, and evaluate."""
     # Use only sentiment as predictor
-    features = ['sentiment_l1', 'sentiment','log_return_l3']
+    features = ['sentiment_l1', 'sentiment', 'month_sin']
     target = 'log_return'
 
     # Drop rows with missing sentiment or required columns
@@ -65,6 +65,23 @@ def train_linear_model(df: pd.DataFrame) -> LinearRegression:
     print(f"R^2 (Close price): {r2_price:.4f}")
     print(f"Coefficient (sentiment): {model.coef_[0]:.6f}")
     print(f"Intercept: {model.intercept_:.6f}")
+
+    errors_abs = np.abs(np.array(preds_close) - np.array(true_close))
+    errors_sq  = errors_abs ** 2
+
+    # 8) Plot actual vs predicted + errors (secondary y-axis)
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+    ax1.plot(test_df.index, true_close, label='Actual Close (t+1)')
+    ax1.plot(test_df.index, preds_close, label='Predicted Close (t+1)')
+    ax1.set_xlabel('Date')
+    ax1.set_ylabel('Close Price')
+    ax1.legend(loc='upper left')
+
+    ax2 = ax1.twinx()
+    ax2.scatter(test_df.index, errors_abs, label='Absolute Error', alpha=0.5, marker='x')
+    ax2.set_ylabel('Absolute Error')
+    ax2.legend(loc='upper right')
+    plt.show()
 
     # Plot actual vs predicted Close prices
     plt.figure(figsize=(10, 5))
