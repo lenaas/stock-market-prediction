@@ -38,10 +38,9 @@ def train_static_arimax(df, seasonal=False):
     5) Forecasts all test points in one call
     6) Reports price‐ & return‐level metrics + directional accuracy
     """
+    
     exog_vars = [
-        'sentiment',
-        'dow_sin',   'dow_cos',
-        'month_sin', 'month_cos'
+        'sentiment'
     ]
     # 1) Stationarity on sentiment
     pval = adfuller(df['sentiment'].dropna())[1]
@@ -84,7 +83,7 @@ def train_static_arimax(df, seasonal=False):
         enforce_stationarity  = True,
         enforce_invertibility = True
     )
-    res = model.fit(disp=False, method='Powell', maxiter=50, tol=1e-4 )
+    res = model.fit(disp=False, method='powell', maxiter=50, tol=1e-4 )
 
     # 6) Forecast log‐returns for entire test
     fc = res.get_forecast(steps=len(test), exog=X_test)
@@ -100,6 +99,7 @@ def train_static_arimax(df, seasonal=False):
     mse_p  = mean_squared_error(trues_price, preds_price)
     rmse_p = np.sqrt(mse_p)
 
+
     # 9) Return‐level metrics
     true_arr = test['log_return'].values
     pred_arr = yhat_log
@@ -107,6 +107,21 @@ def train_static_arimax(df, seasonal=False):
     rmse_r        = np.sqrt(mse_r)
     baseline_mse  = mean_squared_error(true_arr, np.zeros_like(true_arr))
     dir_acc       = (np.sign(pred_arr) == np.sign(true_arr)).mean()
+
+    # ————————————
+    # → Percent‐based price metrics
+
+    # Mean Absolute Percentage Error
+    mape_p = np.mean(
+        np.abs((trues_price - preds_price) / trues_price)
+    ) * 100
+
+    # Symmetric Mean Absolute Percentage Error
+    smape_p = np.mean(
+        2 * np.abs(trues_price - preds_price) /
+        (np.abs(trues_price) + np.abs(preds_price))
+    ) * 100
+
 
     tag = 'SARIMAX' if seasonal else 'ARIMAX'
     print(f"\nStatic Train/Test {tag} Results")
@@ -117,6 +132,9 @@ def train_static_arimax(df, seasonal=False):
     print(f"→ Return RMSE:                {rmse_r:.6f}")
     print(f"→ Baseline Return MSE (zero): {baseline_mse:.6f}")
     print(f"→ Directional Accuracy:       {dir_acc:.3%}")
+    print(f"→ Price MAPE:  {mape_p:.2f}%")
+    print(f"→ Price SMAPE: {smape_p:.2f}%")
+
 
     # 10) Plot price forecasts
     # plt.figure(figsize=(10,5))
@@ -167,32 +185,53 @@ if __name__ == '__main__':
 # Results:
 
 # Statis Train/test ARIMAX Results
-#Static Train/Test ARIMAX Results
-#→ Price MAE:                  2.7300
-#→ Price MSE:                  11.4724
-#→ Price RMSE:                 3.3871
-#→ Return MSE:                 0.000705
-#→ Return RMSE:                0.026552
+#→ Price MAE:                  2.6320
+#→ Price MSE:                  10.9211
+#→ Price RMSE:                 3.3047
+#→ Return MSE:                 0.000665
+#→ Return RMSE:                0.025779
 #→ Baseline Return MSE (zero): 0.000708
-#→ Directional Accuracy:       63.542%
+#→ Directional Accuracy:       66.667%
+#→ Price MAPE:  2.04%
+#→ Price SMAPE: 2.03%
 
-#Static Train/Test ARIMAX Results (with sentiment_l1)
-#→ Price MAE:                  2.8626
-#→ Price MSE:                  12.3609
-#→ Price RMSE:                 3.5158
-#→ Return MSE:                 0.000764
-#→ Return RMSE:                0.027638
-#→ Baseline Return MSE (zero): 0.000708
-#→ Directional Accuracy:       52.083%
-
-
-
-# Static Train/Test SARIMAX Results (with sentimemt_l1)
+# Static Train/Test SARIMAX Results
 #Static Train/Test SARIMAX Results
-#→ Price MAE:                  2.7077
-#→ Price MSE:                  11.3279
-#→ Price RMSE:                 3.3657
-#→ Return MSE:                 0.000700
-#→ Return RMSE:                0.026461
+#→ Price MAE:                  2.6320
+#→ Price MSE:                  10.9211
+#→ Price RMSE:                 3.3047
+#→ Return MSE:                 0.000665
+#→ Return RMSE:                0.025779
 #→ Baseline Return MSE (zero): 0.000708
-#→ Directional Accuracy:       64.583%
+#→ Directional Accuracy:       66.667%
+#→ Price MAPE:  2.04%
+#→ Price SMAPE: 2.03%
+
+#Price MAE ≈ 2.63 and RMSE ≈ 3.30 means on average you’re off by $2.63, and your root‐mean‐square error is $3.30.
+#MAPE ≈ 2.04 % and SMAPE ≈ 2.03 % confirm that your next–day price forecasts are, on average, within about 2 percent of the true price.
+#On the return scale, RMSE ≈ 2.58 % versus baseline RMSE ≈ 2.66 % (zero‐return) is a modest improvement—so you’re beating a “no‐change” model, but only slightly.
+#Directional accuracy ≈ 66.7 % is quite strong: you get two‐thirds of next‐day up/down moves correct.
+
+# About the model:
+# (2, 1, [1], 5) SARIMAX means
+#d = 1: first differencing of the log‐returns (to enforce stationarity),
+#AR(2) on the differenced series,
+#MA(1) on the non‐seasonal part, and
+#a single seasonal lag at period 5 (weekly seasonality on business days).
+#AIC/BIC are quite low (more negative is better), reflecting a good balance of fit vs. parsimony on 383 points.
+#| Parameter | Estimate | Std-Err | z-stat | P>|z| | 95% CI |
+#|-------------|---------:|---------:|-------:|:----:|----------------------|
+#| intercept | −0.0002 | 0.0000 | −1.227 | 0.220 | [−0.001, 0.000] |
+#| sentiment | −0.0053 | 0.0370 | −0.143 | 0.886 | [−0.078, 0.068] |
+#| ar.S.L5 | −0.0487 | 0.0590 | −0.821 | 0.412 | [−0.165, 0.068] |
+#| ar.S.L10 | −0.2584 | 0.0520 | −4.988 | 0.000 | [−0.360, −0.157] |
+#| ma.S.L5 | −0.9242 | 0.0310 | −29.462| 0.000 | [−0.986, −0.863] |
+#| σ² (noise) | 0.0011 | 4.94e−05 | 22.24 | 0.000 | [ 0.001, 0.001] |
+
+#Intercept and sentiment are not statistically different from zero (p > 0.2 and 0.88 respectively) → your sentiment exogenous is not adding predictive power here.
+#Seasonal AR(10) (ar.S.L10) is highly significant (p < 0.001), indicating your log-returns two weeks ago carry over explanatory power.
+#Seasonal MA(5) is also highly significant (p < 0.001), meaning shocks from one week ago are still influencing today’s returns.
+#The AR(5) term itself is not significant, suggesting that the more distant seasonal memory (one week) only really shows up in the MA part.
+#Ljung-Box Q(1) p = 0.45 → no leftover autocorrelation in the one-lag residuals.
+#Jarque-Bera p = 0.00 → heavy tails / non‐normality in residuals (common in financial returns).
+#Heteroskedasticity H test p = 0.59 → residual variance is fairly constant over time.
