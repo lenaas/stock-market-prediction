@@ -97,6 +97,26 @@ def merge_data(price: pd.DataFrame, sentiment: pd.DataFrame, debug: bool = False
     return df
 
 
+
+
+def add_sentiment_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
+    """Create more features from the sentiment data."""
+
+    # Moving averages of sentiment
+    df['sentiment_ma3'] = df['sentiment'].rolling(3).mean()
+    df['sentiment_ma7'] = df['sentiment'].rolling(7).mean()
+
+    # Interaction term between sentiment and volatility
+    df['sentiment_x_volatility'] = df['sentiment'] * df['volatility']
+    
+    if debug:
+        _report(df[["sentiment_ma3", "sentiment_ma7", "sentiment_x_volatility"]], "After sentiment features")
+
+    return df
+
+
+
+
 def add_price_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame:
     """Add returns, volatility, RSI and Bollinger bands.
     Log returns are defined as the difference of the log of closing prices.
@@ -150,38 +170,7 @@ def add_calendar_features(df: pd.DataFrame, debug: bool = False) -> pd.DataFrame
         _report(df[["dow", "month_sin", "month_cos"]], "After calendar encodings")
     return df
 
-def prepare_merged_data(
-    price_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_stock.csv"),
-    sentiment_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_sentiment_daily.csv"),
-    output_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_merged.csv"),
-    debug: bool = False,
-) -> pd.DataFrame:
-    """Create a feature rich, merged data set for downstream modelling."""
 
-    price = load_price_data(price_path)
-    sentiment = load_sentiment_data(sentiment_path)
-    df = merge_data(price, sentiment, debug=debug)
-
-    df["sentiment"], df["sentiment_missing"] = time_decay_impute(
-        df["sentiment"], halflife=3
-    )
-    if debug:
-        _report(df[["sentiment", "sentiment_missing"]], "After sentiment imputation")
-
-    df = add_price_features(df, debug=debug)
-    df = add_lag_features(df, debug=debug)
-    df = add_calendar_features(df, debug=debug)
-
-    df = df.dropna().sort_index()
-    if debug:
-        print("\nFinal data shape after dropna:", df.shape)
-        print("Any remaining NaNs?", df.isna().any().any())
-
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    df.to_csv(output_path, index=True)
-    print(f"Features saved to {output_path}")
-
-    return df
 
 
 def check_seasonality(series: pd.Series, period: int = 5) -> pd.DataFrame:
@@ -273,6 +262,41 @@ def save_diagnostics_pdf(
         }
     )
 
+def prepare_merged_data(
+    price_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_stock.csv"),
+    sentiment_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_sentiment_daily.csv"),
+    output_path=os.path.join(SCRIPT_DIR, "..", "data", "nvda_merged.csv"),
+    debug: bool = False,
+) -> pd.DataFrame:
+    """Create a feature rich, merged data set for downstream modelling."""
+
+    price = load_price_data(price_path)
+    sentiment = load_sentiment_data(sentiment_path)
+    df = merge_data(price, sentiment, debug=debug)
+
+    df["sentiment"], df["sentiment_missing"] = time_decay_impute(
+        df["sentiment"], halflife=3
+    )
+    if debug:
+        _report(df[["sentiment", "sentiment_missing"]], "After sentiment imputation")
+
+    df = add_price_features(df, debug=debug)
+    df = add_lag_features(df, debug=debug)
+    df = add_calendar_features(df, debug=debug)
+    
+    # Add the new sentiment features
+    df = add_sentiment_features(df, debug=debug)
+
+    df = df.dropna().sort_index()
+    if debug:
+        print("\nFinal data shape after dropna:", df.shape)
+        print("Any remaining NaNs?", df.isna().any().any())
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    df.to_csv(output_path, index=True)
+    print(f"Features saved to {output_path}")
+
+    return df
 
 if __name__ == "__main__":
     price_file = os.path.join(SCRIPT_DIR, "..", "data", "nvda_stock.csv")
