@@ -244,7 +244,10 @@ def train_lstm_same_info(
     # reconstruct price_{t+1}
     preds_close = close_t_test * np.exp(preds_log)
     true_close  = df_feat["Close"].reindex(dates_test).values
+###################################################################################################
 
+
+    ######################################################################################################
     # ────────── metrics ──────────
     mae_p  = mean_absolute_error(true_close, preds_close)
     mse_p  = mean_squared_error(true_close, preds_close)

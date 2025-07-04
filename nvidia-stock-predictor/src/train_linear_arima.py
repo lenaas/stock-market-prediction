@@ -9,27 +9,68 @@ import warnings
 
 warnings.filterwarnings("ignore")
 
-def train_linear_model(df):
-    features = ["close_lag1", "close_lag2", "sentiment_lag1", "sentiment_lag2"]
-    target = "Close"
+# def train_linear_model(df):
+#     features = ["close_lag1", "close_lag2", "sentiment_lag1", "sentiment_lag2"]
+#     target = "Close"
 
-    X = df[features]
-    y = df[target]
+#     X = df[features]
+#     y = df[target]
+
+#     model = LinearRegression()
+#     model.fit(X, y)
+#     preds = model.predict(X)
+
+#     mse = mean_squared_error(y, preds)
+#     mae = mean_absolute_error(y, preds)
+
+#     print("\n📈 Linear Regression Results")
+#     print(f"MAE: {mae:.2f}")
+#     print(f"MSE: {mse:.2f}")
+
+#     plt.figure(figsize=(10, 5))
+#     plt.plot(df["Date"], y, label="Actual", alpha=0.7)
+#     plt.plot(df["Date"], preds, label="Predicted (Linear)", alpha=0.7)
+#     plt.title("Linear Regression: Actual vs Predicted NVDA Price")
+#     plt.xlabel("Date")
+#     plt.ylabel("Close Price")
+#     plt.legend()
+#     plt.grid(True)
+#     plt.tight_layout()
+
+#     os.makedirs("models", exist_ok=True)
+#     plt.savefig("models/linear_regression_plot.png")
+#     plt.show()
+def train_linear_model(df):
+    features = ["close_l1", "close_l2", "sentiment_l1", "sentiment_l2"]
+    target   = "Close"
+
+    # keep the Date column for plotting
+    Xy = df[["Date"] + features + [target]].dropna()
+    X  = Xy[features]
+    y  = Xy[target]
 
     model = LinearRegression()
     model.fit(X, y)
-    preds = model.predict(X)
+    preds = model.predict(X)                                   # compute first
+    preds_series = pd.Series(preds, index=Xy.index, name="Preds")
+########################################################################################################
+    pred_df = pd.DataFrame({
+        "Date": Xy["Date"].values,
+        "preds": preds_series.values,     # ← must be lower-case preds
+    })
+    pred_df.to_csv("models/linear_predictions.csv", index=False)
 
-    mse = mean_squared_error(y, preds)
-    mae = mean_absolute_error(y, preds)
+    # -#######################################################################################################################
+    mse = mean_squared_error(y, preds_series)
+    mae = mean_absolute_error(y, preds_series)
 
     print("\n📈 Linear Regression Results")
     print(f"MAE: {mae:.2f}")
     print(f"MSE: {mse:.2f}")
 
     plt.figure(figsize=(10, 5))
-    plt.plot(df["Date"], y, label="Actual", alpha=0.7)
-    plt.plot(df["Date"], preds, label="Predicted (Linear)", alpha=0.7)
+    plt.plot(Xy["Date"], y,            label="Actual",    alpha=0.7)
+    plt.plot(Xy["Date"], preds_series, label="Predicted", alpha=0.7)
     plt.title("Linear Regression: Actual vs Predicted NVDA Price")
     plt.xlabel("Date")
     plt.ylabel("Close Price")
@@ -54,6 +95,15 @@ def train_arima_model(df):
     # Align actual values to predicted ones
     actual = series[2:len(preds)+2]
 
+    ############################################################################
+    pred_df = pd.DataFrame({
+        "Date": df["Date"].iloc[2: len(preds)+2].values,
+        "ARIMA": preds.values,            # ← upper-case ARIMA
+    })
+    pred_df.to_csv("models/arima_predictions.csv", index=False)
+
+        # ------------------------------------------------------------------
+####################################################################
     mae = mean_absolute_error(actual, preds)
     mse = mean_squared_error(actual, preds)
 

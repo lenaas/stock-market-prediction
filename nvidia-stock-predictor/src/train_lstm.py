@@ -6,6 +6,8 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout
 from tensorflow.keras.callbacks import EarlyStopping
+import os
+
 
 
 def create_sequences(data, seq_length):
@@ -56,6 +58,17 @@ def train_lstm_model():
     # Inverse transform predictions using only 'Close' scaler
     y_test_inv = close_scaler.inverse_transform(y_test.reshape(-1, 1)).flatten()
     y_pred_inv = close_scaler.inverse_transform(y_pred).flatten()
+    ###################################################################################################
+    # ── SAVE predictions for evaluate_models.py ───────────────────────
+    test_dates = df["Date"].iloc[-len(y_pred_inv):].values  # grab the matching dates
+    pred_df = pd.DataFrame({
+        "Date": test_dates,
+        "LSTM": y_pred_inv,            # header MUST be 'LSTM'
+    })
+    os.makedirs("models", exist_ok=True)
+    pred_df.to_csv("models/lstm_predictions.csv", index=False)
+    # ------------------------------------------------------------------
+    ###################################################################################################
 
     # Evaluation
     mae = mean_absolute_error(y_test_inv, y_pred_inv)

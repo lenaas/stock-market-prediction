@@ -1,0 +1,5 @@
+{
+    "python.analysis.extraPaths": [
+        "./nvidia-stock-predictor/src"
+    ]
+}

@@ -8,12 +8,12 @@ def load_predictions():
 
     arima_df = pd.read_csv("models/arima_predictions.csv", parse_dates=["Date"])
     lstm_df = pd.read_csv("models/lstm_predictions.csv", parse_dates=["Date"])
-    dual_df = pd.read_csv("models/dual_forecaster_predictions.csv", parse_dates=["Date"])
+    # dual_df = pd.read_csv("models/dual_forecaster_predictions.csv", parse_dates=["Date"])
 
     merged = linear_df[["Date", "Close", "Linear"]].copy()
     merged = merged.merge(arima_df[["Date", "ARIMA"]], on="Date", how="inner")
     merged = merged.merge(lstm_df[["Date", "LSTM"]], on="Date", how="inner")
-    merged = merged.merge(dual_df[["Date", "Dual"]], on="Date", how="inner")
+    # merged = merged.merge(dual_df[["Date", "Dual"]], on="Date", how="inner")
 
     return merged
 
@@ -24,7 +24,6 @@ def plot_all_models(df):
     plt.plot(df["Date"], df["Linear"], label="Linear")
     plt.plot(df["Date"], df["ARIMA"], label="ARIMA")
     plt.plot(df["Date"], df["LSTM"], label="LSTM")
-    plt.plot(df["Date"], df["Dual"], label="Dual-Forecaster")
     plt.title("NVDA Stock: Actual vs All Models")
     plt.xlabel("Date")
     plt.ylabel("Price")
@@ -35,13 +34,27 @@ def plot_all_models(df):
     plt.show()
 
 
+# def calculate_metrics(df):
+#     from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+#     results = []
+#     for col in ["Linear", "ARIMA", "LSTM", "Dual"]:
+#         mae = mean_absolute_error(df["Close"], df[col])
+#         mse = mean_squared_error(df["Close"], df[col])
+#         results.append({"Model": col, "MAE": mae, "MSE": mse})
+
+#     return pd.DataFrame(results)
 def calculate_metrics(df):
     from sklearn.metrics import mean_absolute_error, mean_squared_error
 
     results = []
-    for col in ["Linear", "ARIMA", "LSTM", "Dual"]:
-        mae = mean_absolute_error(df["Close"], df[col])
-        mse = mean_squared_error(df["Close"], df[col])
+    
+    for col in ["Linear", "ARIMA", "LSTM"]:      # ← drop “Dual”
+        if col not in df.columns:          # skip if the column is missing
+            continue
+        valid = df[["Close", col]].dropna()     # ← keep only rows with no NaN
+        mae = mean_absolute_error(valid["Close"], valid[col])
+        mse = mean_squared_error(valid["Close"], valid[col])
         results.append({"Model": col, "MAE": mae, "MSE": mse})
 
     return pd.DataFrame(results)
