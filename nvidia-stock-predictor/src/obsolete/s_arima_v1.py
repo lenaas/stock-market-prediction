@@ -17,7 +17,7 @@ except NameError:
 
 
 def load_data(path=None):
-    """Load NVDA data with log_return, Close, sentiment, and calendar features."""
+    """Load NVDA data with log_return, Close, sentiment."""
     if path is None:
         path = os.path.join(SCRIPT_DIR, '..', 'data', 'nvda_merged.csv')
     df = pd.read_csv(path, parse_dates=['Date']).set_index('Date')
@@ -33,15 +33,14 @@ def train_static_arimax(df, seasonal=False):
     """
     1) Splits first 80% for training, last 20% for testing
     2) ADF‐tests sentiment and differences once if needed
-    3) auto_arima on train with exog = [sentiment, sentiment_l1, dow_sin, dow_cos, month_sin, month_cos]
+    3) auto_arima on train with exog = [sentiment]
     4) Fits one SARIMAX/ARIMAX on full train
     5) Forecasts all test points in one call
     6) Reports price‐ & return‐level metrics + directional accuracy
     """
     
-    exog_vars = [
-        'sentiment'
-    ]
+    exog_vars = ['sentiment']
+
     # 1) Stationarity on sentiment
     pval = adfuller(df['sentiment'].dropna())[1]
     if pval > 0.05:
@@ -71,10 +70,10 @@ def train_static_arimax(df, seasonal=False):
     )
     print(auto.summary())
     order          = auto.order
-    seasonal_order = auto.seasonal_order if seasonal else (0, 0, 0, 0)
 
     # 5) Fit final SARIMAX/ARIMAX
-    print(f"Fitting final {'SARIMAX' if seasonal else 'ARIMAX'} using seasonal_order={seasonal_order}…")
+    print(f"Fitting final {'SARIMAX' if seasonal else 'ARIMAX'}…")
+    seasonal_order = (0, 1, 1, 5)
     model = SARIMAX(
         y_train,
         exog           = X_train,
@@ -182,13 +181,51 @@ def main():
 if __name__ == '__main__':
     main()
 
-#Static Train/Test SARIMAX Results
-#→ Price MAE:                  3.7833
-#→ Price MSE:                  24.0850
-#→ Price RMSE:                 4.9076
-##→ Return MSE:                 0.001547
-#→ Return RMSE:                0.039332
+# Results with Sentiment:
+#Static Train/Test ARIMAX Results
+#→ Price MAE:                  3.8156
+#→ Price MSE:                  24.5946
+#→ Price RMSE:                 4.9593
+#→ Return MSE:                 0.001562
+#→ Return RMSE:                0.039524
 #→ Baseline Return MSE (zero): 0.001022
-#→ Directional Accuracy:       54.483%
-#→ Price MAPE:  3.02%
-#→ Price SMAPE: 3.01%
+#→ Directional Accuracy:       53.103%
+#→ Price MAPE:  3.05%
+#→ Price SMAPE: 3.02%
+
+#Auto‐tuning SARIMA on 577 points…
+#                                 SARIMAX Results                                 
+#=================================================================================
+#Dep. Variable:                         y   No. Observations:                  577
+#Model:             SARIMAX(2, 1, [1], 5)   Log Likelihood                1096.341
+#Date:                   Sat, 05 Jul 2025   AIC                          -2180.681
+#Time:                           15:18:44   BIC                          -2154.586
+#Sample:                                0   HQIC                         -2170.501
+#                                   - 577                                         
+#Covariance Type:                     opg                                         
+#==============================================================================
+#                 coef    std err          z      P>|z|      [0.025      0.975]
+#------------------------------------------------------------------------------
+#intercept      0.0002      0.000      1.280      0.201   -8.59e-05       0.000
+#sentiment     -0.1015      0.133     -0.761      0.447      -0.363       0.160
+#ar.S.L5       -0.0161      0.045     -0.360      0.719      -0.104       0.072
+#ar.S.L10      -0.0573      0.045     -1.287      0.198      -0.145       0.030
+#ma.S.L5       -0.9295      0.025    -37.073      0.000      -0.979      -0.880
+#sigma2         0.0012   4.73e-05     24.965      0.000       0.001       0.001
+#===================================================================================
+#Ljung-Box (L1) (Q):                   0.07   Jarque-Bera (JB):               247.24
+#Prob(Q):                              0.80   Prob(JB):                         0.00
+#Heteroskedasticity (H):               0.48   Skew:                             0.64
+#Prob(H) (two-sided):                  0.00   Kurtosis:                         5.96
+#===================================================================================
+
+#Static Train/Test SARIMAX Results
+#→ Price MAE:                  3.7569
+#→ Price MSE:                  23.6517
+#→ Price RMSE:                 4.8633
+#→ Return MSE:                 0.001522
+#→ Return RMSE:                0.039017
+#→ Baseline Return MSE (zero): 0.001022
+#→ Directional Accuracy:       53.793%
+#→ Price MAPE:  3.00%
+#→ Price SMAPE: 2.99%
