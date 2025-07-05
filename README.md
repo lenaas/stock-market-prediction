@@ -152,6 +152,142 @@ Gap  RMSE:                  3.270154
 Baseline Gap MSE (zero):    10.692839
 Directional Accuracy:       48.837%
 ```
+## Informations about Evaluations
+
+### Price MAE
+**Formula**  
+$$
+\mathrm{MAE} \;=\; \frac{1}{n}\sum_{i=1}^{n}\bigl|y_i - \hat y_i\bigr|
+$$
+
+**Interpretation**  
+Mean Absolute Error measures the average absolute deviation between your predicted prices \(\hat y_i\) and the true prices \(y_i\). Lower MAE indicates closer predictions on average and is less sensitive to large outliers than MSE.
+
+---
+
+### Price MSE
+**Formula**  
+$$
+\mathrm{MSE} \;=\; \frac{1}{n}\sum_{i=1}^{n}\bigl(y_i - \hat y_i\bigr)^{2}
+$$
+
+**Interpretation**  
+Mean Squared Error penalizes larger errors more heavily (due to squaring). It represents the average of squared prediction errors, so it is sensitive to outliers.
+
+---
+
+### Price RMSE
+**Formula**  
+$$
+\mathrm{RMSE} \;=\; \sqrt{\frac{1}{n}\sum_{i=1}^{n}\bigl(y_i - \hat y_i\bigr)^{2}}
+\;=\;\sqrt{\mathrm{MSE}}
+$$
+
+**Interpretation**  
+Root Mean Squared Error brings the error metric back to the original units (price). It is dominated by larger errors and gives a sense of the typical size of your prediction errors.
+
+---
+
+### Price MAPE
+**Formula**  
+$$
+\mathrm{MAPE} \;=\; \frac{100\%}{n}\sum_{i=1}^{n}
+\left|\frac{y_i - \hat y_i}{y_i}\right|
+$$
+
+**Interpretation**  
+Mean Absolute Percentage Error expresses the average error as a percentage of the true price. It is scale-invariant but can become unstable or infinite when any \(y_i\) is near zero.
+
+---
+
+### Price SMAPE
+**Formula**  
+$$
+\mathrm{SMAPE} \;=\; \frac{100\%}{n}\sum_{i=1}^{n}
+\frac{\bigl|y_i - \hat y_i\bigr|}{\bigl(|y_i| + |\hat y_i|\bigr)/2}
+$$
+
+**Interpretation**  
+Symmetric MAPE bounds the error between 0% and 200% by dividing by the average of actual and predicted values, mitigating extreme percentages when values approach zero.
+
+---
+
+### Price \(R^2\) (Coefficient of Determination)
+**Formula**  
+$$
+R^2 \;=\; 1 \;-\;
+\frac{\displaystyle\sum_{i=1}^{n}(y_i - \hat y_i)^{2}}
+{\displaystyle\sum_{i=1}^{n}(y_i - \bar y)^{2}}
+\quad\text{where}\quad
+\bar y = \frac{1}{n}\sum_{i=1}^{n}y_i
+$$
+
+**Interpretation**  
+Proportion of variance in the true prices explained by the model.  
+- \(R^2 = 1\) indicates a perfect fit.  
+- \(R^2 = 0\) means the model is no better than predicting the mean.  
+- \(R^2 < 0\) means the model performs worse than the mean predictor.
+
+---
+
+### Gap MSE
+**Definition of Gap**  
+Let  
+$$
+g_i = y_i - y_{i-1}, 
+\quad
+\hat g_i = \hat y_i - y_{i-1}.
+$$
+
+**Formula**  
+$$
+\mathrm{Gap\ MSE} \;=\;
+\frac{1}{n-1}\sum_{i=2}^{n}(g_i - \hat g_i)^{2}
+$$
+
+**Interpretation**  
+Quantifies how well the model predicts the actual one‐step price change (gap). Lower values indicate more accurate sizing of price moves.
+
+---
+
+### Gap RMSE
+**Formula**  
+$$
+\mathrm{Gap\ RMSE} \;=\;
+\sqrt{\frac{1}{n-1}\sum_{i=2}^{n}(g_i - \hat g_i)^{2}}
+\;=\;\sqrt{\mathrm{Gap\ MSE}}
+$$
+
+**Interpretation**  
+Gives the typical magnitude of price-change prediction errors in the original price‐difference units.
+
+---
+
+## Baseline Gap MSE (zero)
+**Formula**  
+$$
+\mathrm{Baseline\ Gap\ MSE}
+\;=\;
+\frac{1}{n-1}\sum_{i=2}^{n}g_i^{2}
+$$
+
+**Interpretation**  
+The MSE obtained by always predicting zero change (no movement). Serves as a simple benchmark—your model should achieve a lower Gap MSE to be considered useful.
+
+---
+
+### Directional Accuracy
+**Formula**  
+$$
+\mathrm{DirAcc} \;=\;
+\frac{1}{n-1}\sum_{i=2}^{n}
+\mathbf{1}\bigl[\operatorname{sign}(\hat g_i) = \operatorname{sign}(g_i)\bigr]
+$$
+
+**Interpretation**  
+Fraction of time‐steps where the model correctly predicts the direction (up/down) of the price move. A value above 50% indicates better-than-random directional forecasting.
+
+
 
 ## Running the project
 
