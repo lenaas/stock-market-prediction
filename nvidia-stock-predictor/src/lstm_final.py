@@ -348,3 +348,15 @@ if __name__ == "__main__":
 #→ Gap  RMSE:                  3.368554
 #→ Baseline Gap MSE (zero):    11.343951
 #→ Directional Accuracy:       47.407%
+
+#LSTM benchmark (with sentiment)
+#→ Price MAE:                  2.7000
+#→ Price MSE:                  12.2488
+#→ Price RMSE:                 3.4998
+#→ Price MAPE:                 2.19%
+#→ Price SMAPE:                2.18%
+#→ Price R²:                   0.9178
+#→ Gap  MSE:                   10.693910
+#→ Gap  RMSE:                  3.270154
+#→ Baseline Gap MSE (zero):    10.692839
+#→ Directional Accuracy:       48.837%
