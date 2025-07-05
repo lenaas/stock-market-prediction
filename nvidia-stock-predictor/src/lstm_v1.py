@@ -42,6 +42,26 @@ def load_data(path: Optional[str] = None) -> pd.DataFrame:
     df[["close_l1", "Close"]] = df[["close_l1", "Close"]].fillna(method="bfill")
     return df
 
+# ──────────────────────────────
+# technical indicator helpers
+# ──────────────────────────────
+
+def compute_rsi(close: pd.Series, window: int = 14) -> pd.Series:
+    delta = close.diff()
+    up = delta.clip(lower=0)
+    down = -delta.clip(upper=0)
+    roll_up = up.rolling(window).mean()
+    roll_down = down.rolling(window).mean()
+    rs = roll_up / roll_down
+    return 100 - (100 / (1 + rs))
+
+
+def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
+    df["rsi"] = compute_rsi(df["Close"], 14)
+    for w in (5, 20, 50):
+        df[f"ma{w}"] = df["Close"].rolling(w).mean()
+    return df
+
 
 # ──────────────────────────────
 # 2. create supervised sequences
@@ -49,19 +69,21 @@ def load_data(path: Optional[str] = None) -> pd.DataFrame:
 def make_sequences(
     df: pd.DataFrame,
     feature_cols: List[str],
-    target_col: str = "log_return",
+    target_col: str = "gap_t+1",
     seq_len: int = 5,
 ) -> Tuple[np.ndarray, ...]:
-    X, y, close_t, dates = [], [], [], []
+    """Create rolling window sequences predicting t+1 gap."""
+    X, y, open_tp1, true_close, dates = [], [], [], [], []  
     for i in range(seq_len - 1, len(df) - 1):
-        X.append(df[feature_cols].iloc[i - seq_len + 1 : i + 1].values)
-        y.append(df[target_col].iloc[i + 1])       # predict t+1
-        close_t.append(df["Close"].iloc[i])        # price at t
-        dates.append(df.index[i + 1])              # date of t+1
+        y.append(df[target_col].iloc[i])            # gap_{t+1} stored at row t
+        open_tp1.append(df["open_t+1"].iloc[i])
+        true_close.append(df["Close"].iloc[i + 1])
+        dates.append(df.index[i + 1])
     return (
         np.array(X, dtype=np.float32),
         np.array(y, dtype=np.float32),
-        np.array(close_t, dtype=np.float32),
+        np.array(open_tp1, dtype=np.float32),
+        np.array(true_close, dtype=np.float32),
         pd.DatetimeIndex(dates),
     )
 
@@ -95,49 +117,52 @@ class PriceLSTM(torch.nn.Module):
 # ──────────────────────────────
 def train_lstm_same_info(
     df: pd.DataFrame,
+    use_sentiment: bool,
     seq_len: int = 15,
     epochs: int = 500,
     batch_size: int = 32,
     patience: int = 30,
     seed: int = 0,
 ):
+    """Train LSTM on the same feature set as the other benchmarks."""
     set_seed(seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # ────────── feature engineering (same info set as ARIMAX) ──────────
-    df_feat = df.copy()
-    df_feat["sentiment_l1"] = df_feat["sentiment"].shift(1)
-    for k in (1, 5, 10):
-        df_feat[f"log_return_l{k}"] = df_feat["log_return"].shift(k)
+    tag = "with" if use_sentiment else "without"
 
-    feature_cols = [
-        "sentiment", "sentiment_l1",
-        "log_return", "log_return_l1",
-        "log_return_l5", "log_return_l10",
-    ]
-    df_feat = df_feat.dropna(subset=feature_cols + ["log_return", "Close"])
+    # ────────── feature engineering ──────────
+    df_feat = add_technical_indicators(df.copy())
+    df_feat["sentiment_t"] = df_feat["sentiment"]
+    df_feat["log_return_l1"] = df_feat["log_return"].shift(1)
+
+    df_feat["gap_t+1"] = df_feat["Close"].shift(-1) - df_feat["Open"].shift(-1)
+    df_feat["open_t+1"] = df_feat["Open"].shift(-1)
+
+    feature_cols = ["log_return_l1", "rsi", "ma5", "ma20", "ma50"]
+    if use_sentiment:
+        feature_cols.append("sentiment_t")
+
+    df_model = df_feat.dropna(subset=feature_cols + ["gap_t+1", "open_t+1", "Close"])
 
     # ────────── scale features AND target (fit on training only) ──────────
-    split_idx = int(len(df_feat) * 0.8)
-    scaler_x = StandardScaler().fit(df_feat[feature_cols].iloc[:split_idx])
-    scaler_y = StandardScaler().fit(df_feat[["log_return"]].iloc[:split_idx])
+    split_idx = int(len(df_model) * 0.8)
+    scaler_x = StandardScaler().fit(df_model[feature_cols].iloc[:split_idx])
+    scaler_y = StandardScaler().fit(df_model[["gap_t+1"]].iloc[:split_idx])
 
-    df_feat[feature_cols] = scaler_x.transform(df_feat[feature_cols])
-    df_feat["log_return_scaled"] = scaler_y.transform(df_feat[["log_return"]])
+    df_model[feature_cols] = scaler_x.transform(df_model[feature_cols])
+    df_model["gap_scaled"] = scaler_y.transform(df_model[["gap_t+1"]])
 
     # ────────── build sequences ──────────
-    X, y_scaled, close_t, dates = make_sequences(
-        df_feat,
-        feature_cols,
-        target_col="log_return_scaled",
-        seq_len=seq_len,
+    X, y_scaled, open_tp1, true_close, dates = make_sequences(
+        df_model, feature_cols, target_col="gap_scaled", seq_len=seq_len,
     )
 
     # chronological 80/20 split
     split_adj = split_idx - (seq_len - 1)
     X_train, X_test = X[:split_adj], X[split_adj:]
     y_train, y_test = y_scaled[:split_adj], y_scaled[split_adj:]
-    close_t_train, close_t_test = close_t[:split_adj], close_t[split_adj:]
+    open_test = open_tp1[split_adj:]
+    true_close_test = true_close[split_adj:]
     dates_test = dates[split_adj:]
 
     # ────────── PyTorch datasets & loaders ──────────
@@ -237,13 +262,13 @@ def train_lstm_same_info(
     with torch.no_grad():
         preds_scaled = model(torch.tensor(X_test).to(device)).cpu().numpy()
 
-    # inverse-scale preds to raw log-returns
-    preds_log = scaler_y.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
-    true_log  = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
+    # inverse-scale preds to raw gap values
+    preds_gap = scaler_y.inverse_transform(preds_scaled.reshape(-1, 1)).flatten()
+    true_gap  = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
 
     # reconstruct price_{t+1}
-    preds_close = close_t_test * np.exp(preds_log)
-    true_close  = df_feat["Close"].reindex(dates_test).values
+    preds_close = open_test + preds_gap
+    true_close  = true_close_test
 
     # ────────── metrics ──────────
     mae_p  = mean_absolute_error(true_close, preds_close)
@@ -254,33 +279,46 @@ def train_lstm_same_info(
                      (np.abs(true_close) + np.abs(preds_close))) * 100
     r2_p   = r2_score(true_close, preds_close)
 
-    mse_r   = mean_squared_error(true_log, preds_log)
-    rmse_r  = math.sqrt(mse_r)
-    baseline_r = mean_squared_error(true_log, np.zeros_like(true_log))
-    dir_acc = (np.sign(preds_log) == np.sign(true_log)).mean()
+    mse_g   = mean_squared_error(true_gap, preds_gap)
+    rmse_g  = math.sqrt(mse_g)
+    baseline_g = mean_squared_error(true_gap, np.zeros_like(true_gap))
+    dir_acc = (np.sign(preds_gap) == np.sign(true_gap)).mean()
 
-    print("\nLSTM (PyTorch) – same info set")
+    print(f"\nLSTM benchmark ({tag} sentiment)")
     print(f"→ Price MAE:                  {mae_p:.4f}")
     print(f"→ Price MSE:                  {mse_p:.4f}")
     print(f"→ Price RMSE:                 {rmse_p:.4f}")
     print(f"→ Price MAPE:                 {mape_p:.2f}%")
     print(f"→ Price SMAPE:                {smape_p:.2f}%")
     print(f"→ Price R²:                   {r2_p:.4f}")
-    print(f"→ Return MSE:                 {mse_r:.6f}")
-    print(f"→ Return RMSE:                {rmse_r:.6f}")
-    print(f"→ Baseline Return MSE (zero): {baseline_r:.6f}")
+    print(f"→ Gap  MSE:                   {mse_g:.6f}")
+    print(f"→ Gap  RMSE:                  {rmse_g:.6f}")
+    print(f"→ Baseline Gap MSE (zero):    {baseline_g:.6f}")
     print(f"→ Directional Accuracy:       {dir_acc:.3%}")
+
 
     # ────────── Plot ──────────
     plt.figure(figsize=(10, 5))
     plt.plot(dates_test, true_close, label="Actual Close")
     plt.plot(dates_test, preds_close, label="Predicted Close (LSTM)")
     plt.xlabel("Date")
-    plt.ylabel("Close Price")
-    plt.title("LSTM – Actual vs Forecast Close")
+    plt.ylabel("Price")
+    plt.title(f"LSTM next-day Close ({tag} sentiment)")
     plt.legend()
     plt.tight_layout()
+    plot_name = f"lstm_{tag}_sentiment.png"
+    plt.savefig(os.path.join(SCRIPT_DIR, "..", plot_name))
     plt.show()
+
+    results_df = pd.DataFrame({
+        "Date": dates_test,
+        "actual_close": true_close,
+        "predicted_close": preds_close,
+        "actual_gap": true_gap,
+        "predicted_gap": preds_gap,
+    })
+    csv_name = f"lstm_predictions_{tag}_sentiment.csv"
+    results_df.to_csv(os.path.join(SCRIPT_DIR, "..", "data", csv_name), index=False)
 
     return model
 
@@ -289,7 +327,8 @@ def train_lstm_same_info(
 def main() -> None:
     warnings.filterwarnings("ignore", category=FutureWarning)
     df = load_data()
-    train_lstm_same_info(df)
+    train_lstm_same_info(df, use_sentiment=True)
+    train_lstm_same_info(df, use_sentiment=False)
 
 
 if __name__ == "__main__":
