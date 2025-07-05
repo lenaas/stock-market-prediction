@@ -73,8 +73,10 @@ def make_sequences(
     seq_len: int = 5,
 ) -> Tuple[np.ndarray, ...]:
     """Create rolling window sequences predicting t+1 gap."""
-    X, y, open_tp1, true_close, dates = [], [], [], [], []  
+    X, y, open_tp1, true_close, dates = [], [], [], [], []
     for i in range(seq_len - 1, len(df) - 1):
+        # Collect a rolling window of feature values for the sequence.
+        X.append(df[feature_cols].iloc[i - seq_len + 1 : i + 1].values)
         y.append(df[target_col].iloc[i])            # gap_{t+1} stored at row t
         open_tp1.append(df["open_t+1"].iloc[i])
         true_close.append(df["Close"].iloc[i + 1])
@@ -333,3 +335,16 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+# LSTM benchmark (without sentiment)
+#→ Price MAE:                  2.7116
+#→ Price MSE:                  13.0437
+#→ Price RMSE:                 3.6116
+#→ Price MAPE:                 2.20%
+#→ Price SMAPE:                2.19%
+#→ Price R²:                   0.9116
+#→ Gap  MSE:                   11.347156
+#→ Gap  RMSE:                  3.368554
+#→ Baseline Gap MSE (zero):    11.343951
+#→ Directional Accuracy:       47.407%
