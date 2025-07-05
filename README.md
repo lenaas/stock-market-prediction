@@ -51,11 +51,18 @@ Utility functions to create the modelling dataset:
 
 Running the script builds the full merged dataset and stores it in `data/nvda_merged.csv`.
 
+### `feature_engineering.py`
+The script works with log returns instead of raw closing prices. `check_stationarity()` applies ADF and KPSS tests and `save_diagnostics_pdf()` plots seasonal decomposition plus ACF/PACF to ensure the series is usable for ARIMA style models.
+
+Financial indicators include simple and log returns, rolling volatility with a high-volatility flag, short term return acceleration, RSI(14) and Bollinger band width. Lagged versions of returns, sentiment and closing price capture autoregressive structure.
+
+Day-of-week and month cycles are encoded via sine and cosine so the models can learn calendar effects.
+
 ### `feature_selection.py`
 Performs a simple correlation analysis on the engineered dataset. It loads `nvda_merged.csv`, computes feature–feature and feature–target correlations and saves heatmaps to the `models/` folder. The printed rankings were used to decide which features to feed into the models.
 
 ### `linear_regression_final.py`
-Implements the final Ordinary Least Squares benchmark. It mirrors the information used by the ARIMAX model and additionally adds technical indicators (RSI and several moving averages). The script discovers the AR lag order via `pmdarima.auto_arima`, trains on 80% of the data and evaluates on the remainder. At the end of the file are the recorded performances.
+Implements the final Ordinary Least Squares benchmark. It predicts the one-day-ahead price gap (Close_{t+1} − Open_{t+1}) and reconstructs the close from that gap. The feature set mirrors the ARIMAX information plus technical indicators. The script discovers the AR lag order via `pmdarima.auto_arima`, trains on 80% of the data and evaluates on the remainder.
 
 **Without sentiment**
 ```
@@ -86,7 +93,7 @@ Directional Accuracy: 48.462%
 ```
 
 ### `s_arima_final.py`
-Trains a SARIMAX model (non‑seasonal ARIMA with exogenous regressors). The script auto‑tunes the ARIMA order on the training set and optionally includes daily sentiment and technical indicators as exogenous variables. Results printed at the bottom of the file show the impact of sentiment.
+Trains an ARIMAX model using statsmodels' SARIMAX class. The target is again the next-day gap (Close_{t+1} − Open_{t+1}). `pmdarima.auto_arima` searches for the best (p,d,q) order with `seasonal=False`. ARIMAX is used as it conveniently handles exogenous regressors such as sentiment and technical indicators. Also used SARIMAX with `seasonal=True` but there were no changes in performance.
 
 **Without sentiment**
 ```
@@ -117,7 +124,7 @@ Baseline Gap MSE (zero): 10.237654
 A full SARIMAX summary table (coefficients and diagnostics) is included in the file comments for reference.
 
 ### `lstm_final.py`
-Contains a small PyTorch LSTM that operates on rolling windows of features. Sequences are built from lagged returns, technical indicators and optionally sentiment. Training uses early stopping on validation loss. The script saves predictions to CSV and plots predicted vs. actual prices. The bottom of the file records the following performance for the run **without** sentiment:
+Contains a small PyTorch LSTM that operates on rolling windows of features. The network also forecasts the next-day gap (Close_{t+1} − Open_{t+1}) so that the closing price can be reconstructed. Sequences are built from lagged returns, technical indicators and optionally sentiment. Training uses early stopping on validation loss. The script saves predictions to CSV and plots predicted vs. actual prices.
 
 ```
 Price MAE   : 2.7116
